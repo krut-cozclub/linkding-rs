@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>linkding</title>
+<link rel="icon" href="/static/favicon.svg?v={{v}}" type="image/svg+xml">
+<link rel="stylesheet" href="/static/style.css?v={{v}}">
+<link rel="preload" href="/static/app.js?v={{v}}" as="script">
+</head>
+<body>
+<header id="top">
+  <a href="/bookmarks" data-nav class="brand"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg><span>linkding</span></a>
+  <nav>
+    <a href="/bookmarks" data-nav>Bookmarks</a>
+    <a href="/bookmarks/archived" data-nav>Archived</a>
+    <a href="/bookmarks/shared" data-nav>Shared</a>
+    <a href="/tags" data-nav>Tags</a>
+    <a href="/settings" data-nav>Settings</a>
+  </nav>
+  <form id="search" role="search"><input id="q" type="search" placeholder="Search…  #tag  !unread" autocomplete="off" spellcheck="false"></form>
+  <button id="add" class="btn primary" type="button">+ Add</button>
+</header>
+<main id="app" aria-live="polite"></main>
+<div id="toast" role="status"></div>
+<script src="/static/app.js?v={{v}}" defer></script>
+</body>
+</html>

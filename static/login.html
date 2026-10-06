@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Login · linkding</title>
+<link rel="icon" href="/static/favicon.svg?v={{v}}" type="image/svg+xml">
+<link rel="stylesheet" href="/static/style.css?v={{v}}">
+</head>
+<body class="login">
+<form id="f" class="card login-card" autocomplete="on">
+  <h1><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg> linkding</h1>
+  <label>Username<input name="username" autocomplete="username" required autofocus></label>
+  <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+  <p id="err" class="error" hidden></p>
+  <button class="btn primary" type="submit">Login</button>
+</form>
+<script>
+document.getElementById('f').addEventListener('submit', async e => {
+  e.preventDefault();
+  const f = e.target, err = document.getElementById('err');
+  err.hidden = true;
+  const r = await fetch('/login/', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json', 'X-Requested-With': 'ld'},
+    body: JSON.stringify({username: f.username.value, password: f.password.value})
+  });
+  if (r.ok) {
+    const next = new URLSearchParams(location.search).get('next') || '/bookmarks';
+    location.href = next.startsWith('/') && !next.startsWith('//') ? next : '/bookmarks';
+  } else {
+    err.textContent = 'Please enter a correct username and password.';
+    err.hidden = false;
+  }
+});
+</script>
+</body>
+</html>

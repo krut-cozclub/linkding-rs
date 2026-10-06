@@ -1,0 +1,26 @@
+# Render blueprint: https://render.com/docs/blueprint-spec
+# Default: SQLite on a persistent disk (cheapest, fastest). To use Postgres instead,
+# uncomment the `databases` block and the DATABASE_URL `fromDatabase` entry, and delete the disk.
+services:
+  - type: web
+    name: linkding-rs
+    runtime: docker
+    plan: starter            # persistent disks need a paid plan
+    healthCheckPath: /health
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: LD_SUPERUSER_NAME
+        value: admin
+      - key: LD_SUPERUSER_PASSWORD
+        sync: false           # prompted for in the dashboard on first deploy
+      # - key: DATABASE_URL
+      #   fromDatabase:
+      #     name: linkding-db
+      #     property: connectionString
+
+# databases:
+#   - name: linkding-db
+#     plan: free
