@@ -7,7 +7,9 @@ One static binary (~11 MB image), ~2 MB RAM idle, SQLite / PostgreSQL / MySQL, p
 (`/api/bookmarks/`, `/api/tags/`, `/api/user/profile/`, `check`, archive/unarchive, upsert-by-URL, token auth), and
 linkding's Netscape-HTML import/export (including `[linkding-notes]`, `TOREAD`, `PRIVATE` and the `linkding:bookmarks.archived` tag).
 
-**Not implemented (yet):** bundles, assets/snapshots (singlefile), favicon/preview image storage, feeds, OIDC / auth-proxy, auto-tagging rules, multi-user admin UI.
+**Features:** bookmarks with tags, notes, unread/shared flags, archive, bundles, bulk edit, details view, search syntax (`#tag`, `!unread`, `and/or/not`, parentheses), tag management, API tokens, import/export, dark mode.
+
+**Not implemented (yet):** assets/snapshots (singlefile), favicon/preview image storage, feeds, OIDC / auth-proxy, auto-tagging rules, multi-user admin UI.
 
 
 ## One-click deploy
@@ -56,8 +58,16 @@ Metadata scraping is SSRF-protected: private, loopback and link-local addresses 
 * Postgres/MySQL: add the database plugin and set `DATABASE_URL` to its connection variable (`${{Postgres.DATABASE_URL}}`).
 * Set `LD_SUPERUSER_NAME` and `LD_SUPERUSER_PASSWORD`.
 
-**Render** – New → Blueprint, point at the repo (`render.yaml`). Defaults to SQLite on a persistent disk; the file shows
-how to switch to Render Postgres. Set `LD_SUPERUSER_PASSWORD` when prompted.
+**Render** – a web service on Render, pick the variant that fits (Blueprint = New → Blueprint → select the repo; choose a variant via *Blueprint file path*):
+
+| Variant | File | Notes |
+|---|---|---|
+| Docker build from source (default, one-click button above) | `render.yaml` | SQLite on a persistent disk (paid plan) |
+| Prebuilt image, no build step | `deploy/render/image.yaml` | Fastest deploys; uses `ghcr.io/krut-cozclub/linkding-rs` (image must be public) |
+| Free tier + free Postgres | `deploy/render/free-postgres.yaml` | Service sleeps when idle; free DB expires after 30 days |
+| Native Rust runtime (no Docker) | `deploy/render/native-rust.yaml` | Render compiles it for you |
+
+Set `LD_SUPERUSER_PASSWORD` when prompted. Render supplies `PORT`; the app binds to it automatically.
 
 ## Development
 

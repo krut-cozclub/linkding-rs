@@ -52,3 +52,21 @@ dialog h2{margin:0 0 14px;font-size:18px}
 #toast.show{transform:translate(-50%,0);opacity:1}
 body.login{display:grid;place-items:center;min-height:100vh}.login-card{width:min(360px,92vw)}.login-card h1{display:flex;align-items:center;gap:8px;font-size:22px;margin:0 0 16px;color:var(--accent)}
 @media(max-width:820px){.layout{grid-template-columns:1fr}aside{position:static;max-height:none}header{flex-wrap:wrap}#search{order:5;max-width:none;flex-basis:100%}nav{overflow:auto}}
+/* list item layout */
+.sel{display:none;margin-top:3px}.bulk-on .sel{display:block}
+.line{margin-top:2px;word-break:break-word}.line .desc{color:var(--muted);margin:0}
+a.tag{color:var(--tag-fg);background:none;padding:0}.tags a.tag{background:var(--tag);padding:0 8px}
+.sep{color:var(--line)}
+.meta button.on{color:var(--accent);font-weight:600}
+nav a[hidden]{display:none}
+/* filter popover */
+.filter{position:relative}.filter summary{list-style:none;cursor:pointer;display:inline-block}.filter summary::-webkit-details-marker{display:none}
+.filter .pop{position:absolute;right:0;top:34px;z-index:6;min-width:230px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:12px;box-shadow:0 10px 30px #0004;color:var(--fg)}
+.filter .pop label{margin-bottom:8px}.filter .pop select{width:100%}
+/* sidebar */
+aside section{margin-bottom:22px}
+.sh{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;border-bottom:1px solid var(--line);padding-bottom:6px}.sh h3{margin:0}
+.tg{display:inline;margin-right:10px;line-height:1.9}.tg a{display:inline;padding:0;color:var(--tag-fg);margin-right:8px;white-space:nowrap}.tg a:hover{background:none;text-decoration:underline}.tg a.on{background:var(--tag);border-radius:4px;font-weight:600}.tg u{font-weight:700;text-decoration:none;color:var(--accent)}
+.bd{display:flex;justify-content:space-between;align-items:center;padding:1px 8px;border-radius:6px}.bd a{padding:0;flex:1;display:block}.bd.on{background:var(--tag)}.bd a:hover{background:none}
+.kv th{width:110px}
+dialog h4{margin:14px 0 4px;font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}

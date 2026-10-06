@@ -99,24 +99,32 @@ let listState = {kind: 'active', items: [], count: 0};
 
 async function listView(kind, qs) {
   const q = qs.get('q') || '', page = Math.max(0, parseInt(qs.get('page') || '0', 10) || 0);
-  const sort = qs.get('sort') || (profile.search_preferences && profile.search_preferences.sort) || 'added_desc';
-  const unread = qs.get('unread') || '';
+  const pref = profile.search_preferences || {};
+  const sort = qs.get('sort') || pref.sort || 'added_desc';
+  const unread = qs.has('unread') ? qs.get('unread') : (pref.unread && pref.unread !== 'off' ? pref.unread : '');
+  const sharedF = qs.has('shared') ? qs.get('shared') : (pref.shared && pref.shared !== 'off' ? pref.shared : '');
+  const bundle = qs.get('bundle') || '';
+  const norm = v => (v === 'off' ? '' : v);
   if (!app.querySelector('.layout') || listState.kind !== kind) {
     app.innerHTML = `<div class="layout"><aside id="side"></aside><section><div id="tb" class="toolbar"></div><div id="bulk"></div><ul id="list" class="bms"></ul><div id="pager" class="pager"></div></section></div>`;
     $('#list').addEventListener('click', onListClick);
     $('#list').addEventListener('change', updateBulk);
+    listState.bulkMode = false;
   }
-  listState.kind = kind; listState.q = q; listState.page = page; listState.sort = sort; listState.unread = unread;
+  Object.assign(listState, {kind, q, page, sort, unread: norm(unread), shared: norm(sharedF), bundle});
   const base = kind === 'archived' ? '/api/bookmarks/archived/' : kind === 'shared' ? '/api/bookmarks/shared/' : '/api/bookmarks/';
   const p = new URLSearchParams({limit: PER, offset: page * PER, sort});
   if (q) p.set('q', q);
-  if (unread) p.set('unread', unread);
-  const tagsP = kind === 'shared' ? Promise.resolve([]) : getTags();
+  if (norm(unread)) p.set('unread', norm(unread));
+  if (norm(sharedF)) p.set('shared', norm(sharedF));
+  if (bundle) p.set('bundle', bundle);
+  // sidebar data loads in parallel with the list
+  const sideP = kind === 'shared' ? Promise.resolve([[], []]) : Promise.all([getTags(), getBundles()]);
   let data;
   try { data = await api('GET', base + '?' + p); } catch (e) { fail(e); return; }
   listState.items = data.results; listState.count = data.count;
   renderToolbar(); renderList(); renderPager();
-  tagsP.then(renderSide);
+  sideP.then(([t, b]) => renderSide(t, b));
   scrollTo(0, 0);
 }
 
@@ -128,27 +136,67 @@ function setQuery(patch) {
 }
 
 function renderToolbar() {
-  const {count, sort, unread, page, kind} = listState;
+  const {count, sort, unread, shared, page, kind, bulkMode} = listState;
   const from = count ? page * PER + 1 : 0, to = Math.min(count, (page + 1) * PER);
+  const readOnly = kind === 'shared';
+  const filtOpen = !!($('#filt') && $('#filt').open);
   $('#tb').innerHTML = `<span><b>${count}</b> ${kind === 'archived' ? 'archived ' : kind === 'shared' ? 'shared ' : ''}bookmark${count === 1 ? '' : 's'}${count ? ` · ${from}–${to}` : ''}</span><span class="sp"></span>
-    <select id="unreadsel" title="Unread filter"><option value="">All</option><option value="yes">Unread</option><option value="no">Read</option></select>
-    <select id="sortsel" title="Sort"><option value="added_desc">Added ↓</option><option value="added_asc">Added ↑</option><option value="title_asc">Title A–Z</option><option value="title_desc">Title Z–A</option><option value="modified_desc">Modified ↓</option></select>`;
+    <details id="filt" class="filter"><summary class="btn sm" title="Sort and filter">⚙ Filters</summary><div class="pop">
+      <label>Sort<select id="sortsel"><option value="added_desc">Added ↓</option><option value="added_asc">Added ↑</option><option value="title_asc">Title A–Z</option><option value="title_desc">Title Z–A</option><option value="modified_desc">Modified ↓</option><option value="modified_asc">Modified ↑</option></select></label>
+      <label>Unread<select id="unreadsel"><option value="">All</option><option value="yes">Unread only</option><option value="no">Read only</option></select></label>
+      ${profile.enable_sharing ? '<label>Shared<select id="sharedsel"><option value="">All</option><option value="yes">Shared only</option><option value="no">Not shared</option></select></label>' : ''}
+      <div class="row"><button class="btn sm" id="saveprefs" type="button">Save as default</button></div></div></details>
+    ${readOnly ? '' : `<button class="btn sm${bulkMode ? ' primary' : ''}" id="bulkbtn" type="button" title="Select several bookmarks">✎ Bulk edit</button>`}`;
+  $('#filt').open = filtOpen;
   $('#unreadsel').value = unread; $('#sortsel').value = sort;
-  $('#unreadsel').onchange = e => setQuery({unread: e.target.value});
+  if ($('#sharedsel')) { $('#sharedsel').value = shared; $('#sharedsel').onchange = e => setQuery({shared: e.target.value || 'off'}); }
+  $('#unreadsel').onchange = e => setQuery({unread: e.target.value || 'off'});
   $('#sortsel').onchange = e => setQuery({sort: e.target.value});
+  $('#saveprefs').onclick = async () => {
+    try {
+      profile = await api('PATCH', '/api/user/profile/', {search_preferences: {sort: listState.sort, unread: listState.unread || 'off', shared: listState.shared || 'off'}});
+      toast('Saved as default'); $('#filt').open = false;
+    } catch (e) { fail(e); }
+  };
+  if ($('#bulkbtn')) $('#bulkbtn').onclick = () => { listState.bulkMode = !listState.bulkMode; $('#list').classList.toggle('bulk-on', listState.bulkMode); $('#bulkbtn').classList.toggle('primary', listState.bulkMode); if (!listState.bulkMode) $$('.sel').forEach(c => c.checked = false); updateBulk(); };
+  $('#list').classList.toggle('bulk-on', !!bulkMode);
 }
 
-function renderSide(tags) {
+const lsGet = (k, d) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* storage may be blocked */ } };
+const reEsc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+function renderSide(tags, bundles) {
   const side = $('#side'); if (!side) return;
   if (listState.kind === 'shared') { side.innerHTML = ''; return; }
   const q = listState.q.toLowerCase();
-  const on = n => new RegExp('(^|\\s)#' + n.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(\\s|$)').test(q);
-  side.innerHTML = '<h3>Tags</h3>' + (tags.length ? tags.map(t => `<a href="#" data-tag="${esc(t.name)}" class="${on(t.name) ? 'on' : ''}"><span>${esc(t.name)}</span><small>${t.count}</small></a>`).join('') : '<p class="note">No tags yet.</p>');
+  const on = n => new RegExp('(^|\\s)#' + reEsc(n.toLowerCase()) + '(\\s|$)').test(q);
+  const bOpen = lsGet('ld.bundles', '1') === '1', tOpen = lsGet('ld.tags', '1') === '1';
+  const groups = new Map();
+  for (const t of tags) {
+    const c = t.name[0] || '#', k = /[a-z0-9]/i.test(c) ? c.toUpperCase() : c;
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(t);
+  }
+  const tagHTML = tags.length ? [...groups].map(([k, ts]) => `<div class="tg">${ts.map(t => {
+    const cls = on(t.name) ? ' class="on"' : '';
+    return `<a href="#" data-tag="${esc(t.name)}"${cls} title="${t.count}"><u>${esc(t.name[0])}</u>${esc(t.name.slice(1))}</a>`;
+  }).join(' ')}</div>`).join('') : '<p class="note">No tags yet.</p>';
+  const bundleHTML = bundles.length ? bundles.map(b => `<div class="bd${String(b.id) === listState.bundle ? ' on' : ''}"><a href="#" data-bundle="${b.id}">${esc(b.name)}</a><button class="link" data-bedit="${b.id}" title="Edit bundle">✎</button></div>`).join('') : '<p class="note">No bundles yet.</p>';
+  side.innerHTML = `<section><div class="sh"><h3>Bundles</h3><button class="btn sm" data-toggle="bundles" title="Show / hide" aria-expanded="${bOpen}">≡</button></div>${bOpen ? bundleHTML + '<p><button class="link" data-bnew>+ New bundle</button></p>' : ''}</section>
+    <section><div class="sh"><h3>Tags</h3><button class="btn sm" data-toggle="tags" title="Show / hide" aria-expanded="${tOpen}">≡</button></div>${tOpen ? tagHTML : ''}</section>`;
   side.onclick = e => {
+    const tg = e.target.closest('[data-toggle]');
+    if (tg) { lsSet('ld.' + tg.dataset.toggle, lsGet('ld.' + tg.dataset.toggle, '1') === '1' ? '0' : '1'); return renderSide(tags, bundles); }
+    if (e.target.closest('[data-bnew]')) return openBundle(null);
+    const be = e.target.closest('[data-bedit]');
+    if (be) return openBundle(bundles.find(b => b.id === +be.dataset.bedit));
+    const bl = e.target.closest('a[data-bundle]');
+    if (bl) { e.preventDefault(); return setQuery({bundle: String(bl.dataset.bundle) === listState.bundle ? '' : bl.dataset.bundle}); }
     const a = e.target.closest('a[data-tag]'); if (!a) return;
     e.preventDefault();
     const t = a.dataset.tag, cur = listState.q;
-    const re = new RegExp('(^|\\s)#' + t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?=\\s|$)', 'i');
+    const re = new RegExp('(^|\\s)#' + reEsc(t) + '(?=\\s|$)', 'i');
     setQuery({q: re.test(cur) ? cur.replace(re, ' ').trim() : (cur + ' #' + t).trim()});
   };
 }
@@ -157,23 +205,25 @@ function bmHTML(b) {
   const shared = listState.kind === 'shared';
   const fav = profile.enable_favicons ? `<img src="https://www.google.com/s2/favicons?domain=${encodeURIComponent(host(b.url))}&sz=32" alt="" loading="lazy">` : '';
   const target = profile.bookmark_link_target === '_self' ? '_self' : '_blank';
-  const tags = b.tag_names.map(t => `<a href="/bookmarks?q=${encodeURIComponent('#' + t)}" data-nav>#${esc(t)}</a>`).join('');
-  const acts = shared ? '' : `
+  const tags = b.tag_names.map(t => `<a class="tag" href="/bookmarks?q=${encodeURIComponent('#' + t)}" data-nav>#${esc(t)}</a>`).join(' ');
+  const line = tags || b.description ? `<div class="line">${tags}${tags && b.description ? ' <span class="sep">|</span> ' : ''}${b.description ? `<span class="desc">${esc(b.description)}</span>` : ''}</div>` : '';
+  const acts = shared ? '<button data-act="view">View</button>' : `
+    <button data-act="view">View</button>
     <button data-act="edit">Edit</button>
     <button data-act="${b.is_archived ? 'unarchive' : 'archive'}">${b.is_archived ? 'Unarchive' : 'Archive'}</button>
-    ${b.unread ? '<button data-act="read">Mark as read</button>' : ''}
-    ${profile.enable_sharing ? `<button data-act="share">${b.shared ? 'Unshare' : 'Share'}</button>` : ''}
-    ${b.notes ? '<button data-act="notes">Notes</button>' : ''}
-    <button class="del" data-act="delete">Remove</button>`;
+    <button class="del" data-act="delete">Remove</button>
+    <span class="sep">|</span>
+    <button data-act="toggleunread" class="${b.unread ? 'on' : ''}" title="Toggle unread">📖 Unread</button>
+    ${profile.enable_sharing ? `<button data-act="share" class="${b.shared ? 'on' : ''}">${b.shared ? 'Shared' : 'Share'}</button>` : ''}
+    ${b.notes ? '<button data-act="notes">Notes</button>' : ''}`;
   return `<li class="bm${b.unread ? ' unread' : ''}" data-id="${b.id}">
     ${shared ? '' : '<input type="checkbox" class="sel" aria-label="Select">'}
     <div class="main">
       <a class="title" href="${esc(b.url)}" target="${target}" rel="noopener noreferrer">${fav}${esc(b.title || b.url)}</a>
       ${profile.display_url || !b.title ? `<div class="url">${esc(b.url)}</div>` : ''}
-      ${b.description ? `<div class="desc">${esc(b.description)}</div>` : ''}
+      ${line}
       ${b.notes ? `<div class="notes"${profile.permanent_notes ? '' : ' hidden'}>${esc(b.notes)}</div>` : ''}
-      ${tags ? `<div class="tags">${tags}</div>` : ''}
-      <div class="meta"><span title="${esc(b.date_added)}">${rel(b.date_added)}</span>${b.unread ? '<span class="badge">unread</span>' : ''}${b.shared ? '<span class="badge">shared</span>' : ''}${acts}</div>
+      <div class="meta"><span title="${esc(b.date_added)}">${rel(b.date_added)}</span><span class="sep">|</span>${acts}</div>
     </div></li>`;
 }
 
@@ -194,15 +244,15 @@ async function onListClick(e) {
   const li = btn.closest('.bm'), id = +li.dataset.id, b = listState.items.find(x => x.id === id), act = btn.dataset.act;
   try {
     if (act === 'notes') { $('.notes', li).hidden = !$('.notes', li).hidden; return; }
+    if (act === 'view') return openView(b);
     if (act === 'edit') return openForm(b);
     if (act === 'delete') {
       if (!confirm('Remove this bookmark?')) return;
-      li.remove(); listState.count--; await api('DELETE', `/api/bookmarks/${id}/`); tagStats = null; getTags(true).then(renderSide); renderToolbar(); return;
+      li.remove(); listState.count--; await api('DELETE', `/api/bookmarks/${id}/`); tagStats = null; getTags(true).then(t => renderSide(t, bundlesCache || [])); renderToolbar(); return;
     }
     if (act === 'archive' || act === 'unarchive') { li.remove(); listState.count--; await api('POST', `/api/bookmarks/${id}/${act}/`); toast(act === 'archive' ? 'Archived' : 'Unarchived'); renderToolbar(); return; }
-    if (act === 'read') { await api('PATCH', `/api/bookmarks/${id}/`, {unread: false}); Object.assign(b, {unread: false}); }
-    if (act === 'share') { await api('PATCH', `/api/bookmarks/${id}/`, {shared: !b.shared}); b.shared = !b.shared; }
-    li.outerHTML = bmHTML(b);
+    if (act === 'toggleunread') { b.unread = !b.unread; li.outerHTML = bmHTML(b); await api('PATCH', `/api/bookmarks/${id}/`, {unread: b.unread}); return; }
+    if (act === 'share') { b.shared = !b.shared; li.outerHTML = bmHTML(b); await api('PATCH', `/api/bookmarks/${id}/`, {shared: b.shared}); return; }
   } catch (err) { fail(err); listView(listState.kind, new URLSearchParams(location.search)); }
 }
 
@@ -210,15 +260,16 @@ async function onListClick(e) {
 function selectedIds() { return $$('.sel:checked').map(c => +c.closest('.bm').dataset.id); }
 function updateBulk() {
   const box = $('#bulk'); if (!box) return;
+  if (!listState.bulkMode) { box.innerHTML = ''; return; }
   const n = selectedIds().length;
-  if (!n) { box.innerHTML = ''; return; }
   const arch = listState.kind === 'archived';
   box.innerHTML = `<div class="bulk"><b>${n} selected</b>
-    <button class="btn sm" data-b="${arch ? 'unarchive' : 'archive'}">${arch ? 'Unarchive' : 'Archive'}</button>
+    <button class="btn sm" data-b="all">${n && $$('.sel').every(c => c.checked) ? 'Select none' : 'Select all'}</button>
+    ${n ? `<button class="btn sm" data-b="${arch ? 'unarchive' : 'archive'}">${arch ? 'Unarchive' : 'Archive'}</button>
     <button class="btn sm" data-b="read">Mark read</button><button class="btn sm" data-b="unread">Mark unread</button>
+    ${profile.enable_sharing ? '<button class="btn sm" data-b="share">Share</button><button class="btn sm" data-b="unshare">Unshare</button>' : ''}
     <button class="btn sm" data-b="tag">Add tags…</button><button class="btn sm" data-b="untag">Remove tags…</button>
-    <button class="btn sm danger" data-b="delete">Delete</button>
-    <button class="btn sm" data-b="all">${$$('.sel').every(c => c.checked) ? 'Select none' : 'Select all'}</button></div>`;
+    <button class="btn sm danger" data-b="delete">Delete</button>` : ''}</div>`;
   box.onclick = async e => {
     const a = e.target.closest('[data-b]'); if (!a) return;
     let act = a.dataset.b, tags;
@@ -227,6 +278,67 @@ function updateBulk() {
     if (act === 'tag' || act === 'untag') { const t = prompt('Tags (space separated)'); if (!t) return; tags = t.split(/[\s,]+/).filter(Boolean); }
     try { await api('POST', '/api/bookmarks/bulk/', {action: act, ids: selectedIds(), tags}); tagStats = null; toast('Done'); listView(listState.kind, new URLSearchParams(location.search)); } catch (er) { fail(er); }
   };
+}
+
+// ---------------------------------------------------------------- details / bundles dialogs
+let bundlesCache = null;
+async function getBundles(force) {
+  if (!bundlesCache || force) { try { bundlesCache = (await api('GET', '/api/bundles/?limit=500')).results; } catch { bundlesCache = bundlesCache || []; } }
+  return bundlesCache;
+}
+
+function mkDialog(id) {
+  let d = document.getElementById(id);
+  if (!d) { d = document.createElement('dialog'); d.id = id; document.body.appendChild(d); d.addEventListener('click', e => { if (e.target === d) d.close(); }); }
+  return d;
+}
+
+function openView(b) {
+  const d = mkDialog('viewdlg');
+  const full = iso => new Date(iso).toLocaleString();
+  d.innerHTML = `<h2>${esc(b.title || b.url)}</h2>
+    <p><a href="${esc(b.url)}" target="_blank" rel="noopener noreferrer" style="word-break:break-all">${esc(b.url)}</a></p>
+    ${b.tag_names.length ? `<div class="tags">${b.tag_names.map(t => `<a class="tag" href="/bookmarks?q=${encodeURIComponent('#' + t)}" data-nav>#${esc(t)}</a>`).join(' ')}</div>` : ''}
+    ${b.description ? `<h4>Description</h4><p style="white-space:pre-wrap">${esc(b.description)}</p>` : ''}
+    ${b.notes ? `<h4>Notes</h4><div class="notes">${esc(b.notes)}</div>` : ''}
+    <table class="kv"><tr><th>Added</th><td>${full(b.date_added)}</td></tr><tr><th>Modified</th><td>${full(b.date_modified)}</td></tr>
+    <tr><th>Status</th><td>${[b.is_archived ? 'archived' : 'active', b.unread ? 'unread' : 'read', b.shared ? 'shared' : 'private'].join(' · ')}</td></tr>
+    <tr><th>Web archive</th><td><a href="${esc(b.web_archive_snapshot_url)}" target="_blank" rel="noopener noreferrer">Wayback Machine</a></td></tr></table>
+    <div class="row" style="justify-content:flex-end;margin-top:14px">${listState.kind === 'shared' ? '' : '<button class="btn" id="vedit">Edit</button>'}<button class="btn primary" id="vclose">Close</button></div>`;
+  d.querySelector('#vclose').onclick = () => d.close();
+  d.querySelectorAll('a[data-nav]').forEach(a => a.addEventListener('click', () => d.close()));
+  if (d.querySelector('#vedit')) d.querySelector('#vedit').onclick = () => { d.close(); openForm(b); };
+  d.showModal();
+}
+
+function openBundle(b) {
+  const d = mkDialog('bundledlg');
+  const sel = (n, v) => `<select name="${n}">${[['off', 'Any'], ['yes', 'Yes'], ['no', 'No']].map(([k, l]) => `<option value="${k}"${(v || 'off') === k ? ' selected' : ''}>${l}</option>`).join('')}</select>`;
+  d.innerHTML = `<form method="dialog"><h2>${b ? 'Edit' : 'New'} bundle</h2>
+    <label>Name<input name="name" required maxlength="256" value="${esc(b ? b.name : '')}"></label>
+    <label>Search terms<input name="search" maxlength="256" placeholder="e.g. rust async" value="${esc(b ? b.search : '')}"></label>
+    <label>Any of these tags<input name="any_tags" placeholder="space-separated" value="${esc(b ? b.any_tags : '')}"></label>
+    <label>All of these tags<input name="all_tags" placeholder="space-separated" value="${esc(b ? b.all_tags : '')}"></label>
+    <label>Exclude these tags<input name="excluded_tags" placeholder="space-separated" value="${esc(b ? b.excluded_tags : '')}"></label>
+    <div class="row"><label>Unread${sel('filter_unread', b && b.filter_unread)}</label><label>Shared${sel('filter_shared', b && b.filter_shared)}</label></div>
+    <p class="error" id="bderr" hidden></p>
+    <div class="row" style="justify-content:flex-end">${b ? '<button class="btn danger" type="button" id="bddel" style="margin-right:auto">Delete</button>' : ''}<button class="btn" type="button" id="bdcancel">Cancel</button><button class="btn primary" type="submit">Save</button></div></form>`;
+  const f = d.querySelector('form');
+  d.querySelector('#bdcancel').onclick = () => d.close();
+  if (b) d.querySelector('#bddel').onclick = async () => {
+    if (!confirm('Delete this bundle? Bookmarks are kept.')) return;
+    try { await api('DELETE', `/api/bundles/${b.id}/`); d.close(); await getBundles(true); if (String(b.id) === listState.bundle) setQuery({bundle: ''}); else renderSide(await getTags(), bundlesCache); } catch (e) { fail(e); }
+  };
+  f.onsubmit = async e => {
+    e.preventDefault();
+    const body = {};
+    for (const el of f.elements) if (el.name) body[el.name] = el.value.trim();
+    try {
+      if (b) await api('PATCH', `/api/bundles/${b.id}/`, body); else await api('POST', '/api/bundles/', body);
+      d.close(); await getBundles(true); renderSide(await getTags(), bundlesCache); toast('Bundle saved');
+    } catch (er) { const x = d.querySelector('#bderr'); x.textContent = er.message; x.hidden = false; }
+  };
+  d.showModal();
 }
 
 // ---------------------------------------------------------------- add / edit dialog
@@ -397,7 +509,7 @@ addEventListener('keydown', e => {
 
 (async () => {
   anon = location.pathname === '/bookmarks/shared';
-  try { profile = await api('GET', '/api/user/profile/'); applyTheme(); } catch (e) { if (!anon) return; profile = {}; $('#add').hidden = true; }
+  try { profile = await api('GET', '/api/user/profile/'); applyTheme(); if (!profile.enable_sharing) $('nav a[href="/bookmarks/shared"]').hidden = true; } catch (e) { if (!anon) return; profile = {}; $('#add').hidden = true; }
   route();
 })();
 })();

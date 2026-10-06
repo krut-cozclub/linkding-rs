@@ -192,7 +192,7 @@ fn like_escape(s: &str) -> String {
 
 // Uncorrelated, so the database evaluates it once rather than per bookmark row.
 // Tags are per-owner and only ever linked to that owner's bookmarks, so no owner check is needed here.
-const TAG_EXISTS: &str =
+pub const TAG_EXISTS: &str =
     "b.id IN (SELECT bt.bookmark_id FROM bookmark_tags bt JOIN tags t ON t.id = bt.tag_id WHERE t.name_lower = ?)";
 
 pub fn to_sql(n: &Node, lax: bool, sql: &mut String, params: &mut Vec<P>) {

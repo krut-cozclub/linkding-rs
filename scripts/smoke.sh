@@ -114,6 +114,28 @@ has "imported unread" "$R" '"unread":true'
 has "imported dates" "$R" '"date_added":"2020-09-13T12:26:40.000000Z"'
 has "dup keeps single rust-lang" "$(curl -s "${A[@]}" --get --data-urlencode 'q=rust-lang.org' $B/api/bookmarks/)" '"count":1,'
 
+echo "== bundles"
+R=$(curl -s "${A[@]}" "${J[@]}" -d '{"name":"B1","all_tags":"bulk","excluded_tags":"news"}' $B/api/bundles/)
+has "bundle create" "$R" '"name":"B1"'
+has "bundle defaults" "$R" '"filter_unread":"off"'
+BID=$(printf '%s' "$R" | grep -o '"id":[0-9]*' | head -1 | grep -o '[0-9]*')
+curl -s "${A[@]}" "${J[@]}" -d '{"name":"B2","any_tags":"lang news"}' $B/api/bundles/ >/dev/null
+curl -s "${A[@]}" "${J[@]}" -d '{"name":"B3","search":"hacker"}' $B/api/bundles/ >/dev/null
+has "bundle order" "$(curl -s "${A[@]}" $B/api/bundles/)" '"order":2'
+has "bundle all+excluded filter" "$(curl -s "${A[@]}" "$B/api/bookmarks/?bundle=$BID")" '"count":2,'
+BID2=$(curl -s "${A[@]}" $B/api/bundles/ | tr '{' '
+' | grep '"name":"B2"' | grep -o '"id":[0-9]*' | grep -o '[0-9]*')
+BID3=$(curl -s "${A[@]}" $B/api/bundles/ | tr '{' '
+' | grep '"name":"B3"' | grep -o '"id":[0-9]*' | grep -o '[0-9]*')
+has "bundle any_tags filter" "$(curl -s "${A[@]}" "$B/api/bookmarks/?bundle=$BID2")" '"count":2,'
+has "bundle search filter" "$(curl -s "${A[@]}" "$B/api/bookmarks/?bundle=$BID3")" '"count":1,'
+has "bundle + q combine" "$(curl -s "${A[@]}" --get --data-urlencode 'q=#lang' "$B/api/bookmarks/?bundle=$BID2")" '"count":1,'
+has "bundle patch" "$(curl -s -X PATCH "${A[@]}" "${J[@]}" -d '{"name":"B1x","filter_unread":"no"}' $B/api/bundles/$BID/)" '"name":"B1x"'
+has "bundle bad enum" "$(curl -s -X PATCH "${A[@]}" "${J[@]}" -d '{"filter_shared":"maybe"}' $B/api/bundles/$BID/)" 'Must be one of'
+[ "$(code -X DELETE "${A[@]}" $B/api/bundles/$BID/)" = 204 ] && ok "bundle delete" || bad "bundle delete" ""
+has "bundle renumbered" "$(curl -s "${A[@]}" $B/api/bundles/)" '"order":1'
+for i in $BID2 $BID3; do curl -s -o /dev/null -X DELETE "${A[@]}" $B/api/bundles/$i/; done
+
 echo "== shared / delete"
 has "shared requires sharing enabled" "$(curl -s $B/api/bookmarks/shared/)" '"count":0,'
 curl -s -b $JAR -X PATCH -H 'X-Requested-With: ld' "${J[@]}" -d '{"enable_sharing":true,"enable_public_sharing":true}' $B/api/user/profile/ >/dev/null

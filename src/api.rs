@@ -276,6 +276,56 @@ async fn list_core(
         }
     }
 
+    if let (Some(bid), Some(owner)) = (q.get("bundle").and_then(|b| b.parse::<i64>().ok()), owner) {
+        let row = app
+            .db
+            .fetch_opt(
+                &app.db.pool,
+                "SELECT search, any_tags, all_tags, excluded_tags, filter_unread, filter_shared FROM bundles WHERE id = ? AND owner_id = ?",
+                &[bid.into(), owner.into()],
+            )
+            .await?;
+        if let Some(r) = row {
+            let words = |i: usize| -> Result<Vec<String>, sqlx::Error> {
+                Ok(r.try_get::<String, _>(i)?.split_whitespace().map(|t| t.to_lowercase()).collect())
+            };
+            let tag_in = |sql: &mut String, params: &mut Vec<P>, tags: &[String], sep: &str, negate: bool| {
+                if tags.is_empty() {
+                    return;
+                }
+                sql.push_str(" AND ");
+                if negate {
+                    sql.push_str("NOT ");
+                }
+                sql.push('(');
+                for (i, t) in tags.iter().enumerate() {
+                    if i > 0 {
+                        sql.push_str(sep);
+                    }
+                    sql.push_str(search::TAG_EXISTS);
+                    params.push(P::S(t.clone()));
+                }
+                sql.push(')');
+            };
+            let (any, all, excl) = (words(1)?, words(2)?, words(3)?);
+            tag_in(&mut where_sql, &mut params, &any, " OR ", false);
+            tag_in(&mut where_sql, &mut params, &all, " AND ", false);
+            tag_in(&mut where_sql, &mut params, &excl, " OR ", true);
+            for (i, col) in [(4, "b.unread"), (5, "b.shared")] {
+                match r.try_get::<String, _>(i)?.as_str() {
+                    "yes" => where_sql.push_str(&format!(" AND {col} = 1")),
+                    "no" => where_sql.push_str(&format!(" AND {col} = 0")),
+                    _ => {}
+                }
+            }
+            let bsearch: String = r.try_get(0)?;
+            if let Ok(Some(node)) = search::parse(&bsearch) {
+                where_sql.push_str(" AND ");
+                search::to_sql(&node, false, &mut where_sql, &mut params);
+            }
+        }
+    }
+
     let query = q.get("q").map(|s| s.as_str()).unwrap_or("");
     if !query.trim().is_empty() {
         match search::parse(query) {
@@ -954,6 +1004,174 @@ pub async fn tokens_delete(State(app): State<S>, Auth(uid): Auth, Path(id): Path
     }
     if let Ok(mut t) = app.tokens.write() {
         t.clear();
+    }
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+// ------------------------------------------------------------ bundles
+
+const BUNDLE_COLS: &str =
+    "id, name, search, any_tags, all_tags, excluded_tags, filter_unread, filter_shared, sort_order, date_created, date_modified";
+
+fn bundle_json(r: &sqlx::any::AnyRow) -> Result<Value, sqlx::Error> {
+    Ok(json!({
+        "id": r.try_get::<i64, _>(0)?,
+        "name": r.try_get::<String, _>(1)?,
+        "search": r.try_get::<String, _>(2)?,
+        "any_tags": r.try_get::<String, _>(3)?,
+        "all_tags": r.try_get::<String, _>(4)?,
+        "excluded_tags": r.try_get::<String, _>(5)?,
+        "filter_unread": r.try_get::<String, _>(6)?,
+        "filter_shared": r.try_get::<String, _>(7)?,
+        "order": r.try_get::<i64, _>(8)?,
+        "date_created": iso(r.try_get::<i64, _>(9)?),
+        "date_modified": iso(r.try_get::<i64, _>(10)?),
+    }))
+}
+
+async fn get_bundle(app: &S, uid: i64, id: i64) -> ApiResult<Option<Value>> {
+    let sql = format!("SELECT {BUNDLE_COLS} FROM bundles WHERE id = ? AND owner_id = ?");
+    let row = app.db.fetch_opt(&app.db.pool, &sql, &[id.into(), uid.into()]).await?;
+    Ok(row.map(|r| bundle_json(&r)).transpose()?)
+}
+
+pub async fn bundles_list(State(app): State<S>, Auth(uid): Auth, headers: HeaderMap, Query(q): Q) -> ApiResult<Response> {
+    let (limit, offset) = paging(&q);
+    let sql = format!("SELECT {BUNDLE_COLS} FROM bundles WHERE owner_id = ? ORDER BY sort_order, id");
+    let rows = app.db.fetch_all(&app.db.pool, &sql, &[uid.into()]).await?;
+    let all = rows.iter().map(bundle_json).collect::<Result<Vec<_>, _>>()?;
+    let count = all.len() as i64;
+    let results: Vec<Value> = all.into_iter().skip(offset as usize).take(limit as usize).collect();
+    Ok(page(&headers, "/api/bundles/", &q, count, limit, offset, results))
+}
+
+pub async fn bundle_get(State(app): State<S>, Auth(uid): Auth, Path(id): Path<i64>) -> ApiResult<Response> {
+    let b = get_bundle(&app, uid, id).await?.ok_or_else(ApiError::not_found)?;
+    Ok(json_response(StatusCode::OK, &b))
+}
+
+fn bundle_fields(m: &Map<String, Value>, create: bool) -> ApiResult<Map<String, Value>> {
+    let mut errs = Map::new();
+    let mut out = Map::new();
+    for (key, max) in [("name", 256usize), ("search", 256), ("any_tags", 1024), ("all_tags", 1024), ("excluded_tags", 1024)] {
+        match m.get(key) {
+            None if create && key == "name" => {
+                errs.insert(key.into(), json!(["This field is required."]));
+            }
+            None => {}
+            Some(Value::String(s)) if s.chars().count() <= max => {
+                if key == "name" && s.trim().is_empty() {
+                    errs.insert(key.into(), json!(["This field may not be blank."]));
+                } else {
+                    out.insert(key.into(), json!(s.trim()));
+                }
+            }
+            Some(Value::String(_)) => {
+                errs.insert(key.into(), json!([format!("Ensure this field has no more than {max} characters.")]));
+            }
+            Some(_) => {
+                errs.insert(key.into(), json!(["Not a valid string."]));
+            }
+        }
+    }
+    for key in ["filter_unread", "filter_shared"] {
+        match m.get(key).and_then(|v| v.as_str()) {
+            None if !m.contains_key(key) => {}
+            Some(v @ ("off" | "yes" | "no")) => {
+                out.insert(key.into(), json!(v));
+            }
+            _ => {
+                errs.insert(key.into(), json!(["Must be one of: off, yes, no."]));
+            }
+        }
+    }
+    if errs.is_empty() {
+        Ok(out)
+    } else {
+        Err(ApiError { status: StatusCode::BAD_REQUEST, body: Value::Object(errs), www_auth: false })
+    }
+}
+
+fn s(m: &Map<String, Value>, k: &str, d: &str) -> String {
+    m.get(k).and_then(|v| v.as_str()).unwrap_or(d).to_string()
+}
+
+pub async fn bundle_create(State(app): State<S>, Auth(uid): Auth, body: Bytes) -> ApiResult<Response> {
+    let m = bundle_fields(&parse_body(&body)?, true)?;
+    let next: i64 = app
+        .db
+        .fetch_opt(&app.db.pool, "SELECT COALESCE(MAX(sort_order) + 1, 0) FROM bundles WHERE owner_id = ?", &[uid.into()])
+        .await?
+        .map(|r| r.try_get(0))
+        .transpose()?
+        .unwrap_or(0);
+    let now = now_micros();
+    let id = app
+        .db
+        .insert(
+            &app.db.pool,
+            "INSERT INTO bundles (owner_id, name, search, any_tags, all_tags, excluded_tags, filter_unread, filter_shared, sort_order, date_created, date_modified) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            &[
+                uid.into(),
+                s(&m, "name", "").into(),
+                s(&m, "search", "").into(),
+                s(&m, "any_tags", "").into(),
+                s(&m, "all_tags", "").into(),
+                s(&m, "excluded_tags", "").into(),
+                s(&m, "filter_unread", "off").into(),
+                s(&m, "filter_shared", "off").into(),
+                next.into(),
+                now.into(),
+                now.into(),
+            ],
+        )
+        .await?;
+    let b = get_bundle(&app, uid, id).await?.ok_or_else(ApiError::not_found)?;
+    Ok(json_response(StatusCode::CREATED, &b))
+}
+
+async fn bundle_update(app: S, uid: i64, id: i64, body: Bytes, partial: bool) -> ApiResult<Response> {
+    get_bundle(&app, uid, id).await?.ok_or_else(ApiError::not_found)?;
+    let m = bundle_fields(&parse_body(&body)?, !partial)?;
+    let mut sets = vec!["date_modified = ?".to_string()];
+    let mut p: Vec<P> = vec![now_micros().into()];
+    for (k, v) in &m {
+        sets.push(format!("{k} = ?"));
+        p.push(v.as_str().unwrap_or("").into());
+    }
+    p.push(id.into());
+    p.push(uid.into());
+    let sql = format!("UPDATE bundles SET {} WHERE id = ? AND owner_id = ?", sets.join(", "));
+    app.db.execute(&app.db.pool, &sql, &p).await?;
+    let b = get_bundle(&app, uid, id).await?.ok_or_else(ApiError::not_found)?;
+    Ok(json_response(StatusCode::OK, &b))
+}
+
+pub async fn bundle_put(State(app): State<S>, Auth(uid): Auth, Path(id): Path<i64>, body: Bytes) -> ApiResult<Response> {
+    bundle_update(app, uid, id, body, false).await
+}
+
+pub async fn bundle_patch(State(app): State<S>, Auth(uid): Auth, Path(id): Path<i64>, body: Bytes) -> ApiResult<Response> {
+    bundle_update(app, uid, id, body, true).await
+}
+
+pub async fn bundle_delete(State(app): State<S>, Auth(uid): Auth, Path(id): Path<i64>) -> ApiResult<Response> {
+    let n = app
+        .db
+        .execute(&app.db.pool, "DELETE FROM bundles WHERE id = ? AND owner_id = ?", &[id.into(), uid.into()])
+        .await?;
+    if n == 0 {
+        return Err(ApiError::not_found());
+    }
+    // keep the ordering contiguous like linkding does
+    let rows = app
+        .db
+        .fetch_all(&app.db.pool, "SELECT id FROM bundles WHERE owner_id = ? ORDER BY sort_order, id", &[uid.into()])
+        .await?;
+    for (i, r) in rows.iter().enumerate() {
+        app.db
+            .execute(&app.db.pool, "UPDATE bundles SET sort_order = ? WHERE id = ?", &[(i as i64).into(), r.try_get::<i64, _>(0)?.into()])
+            .await?;
     }
     Ok(StatusCode::NO_CONTENT.into_response())
 }

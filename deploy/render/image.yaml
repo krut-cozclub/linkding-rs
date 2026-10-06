@@ -1,0 +1,20 @@
+# Render web service from the PREBUILT image: no build step, deploys in seconds.
+# Needs the image to be public: ghcr.io/krut-cozclub/linkding-rs
+# Use in the dashboard: New -> Blueprint -> pick this repo -> "Blueprint file path": deploy/render/image.yaml
+services:
+  - type: web
+    name: linkding-rs
+    runtime: image
+    image:
+      url: ghcr.io/krut-cozclub/linkding-rs:latest
+    plan: starter             # persistent disks need a paid plan
+    healthCheckPath: /health
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: LD_SUPERUSER_NAME
+        value: admin
+      - key: LD_SUPERUSER_PASSWORD
+        sync: false           # you are prompted for it on first deploy

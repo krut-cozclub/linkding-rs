@@ -251,6 +251,20 @@ impl Db {
                 date_added BIGINT NOT NULL,
                 UNIQUE (owner_id, name_lower)
             )",
+            "CREATE TABLE IF NOT EXISTS bundles (
+                id {PK},
+                owner_id BIGINT NOT NULL,
+                name VARCHAR(256) NOT NULL,
+                search VARCHAR(256) NOT NULL,
+                any_tags VARCHAR(1024) NOT NULL,
+                all_tags VARCHAR(1024) NOT NULL,
+                excluded_tags VARCHAR(1024) NOT NULL,
+                filter_unread VARCHAR(3) NOT NULL,
+                filter_shared VARCHAR(3) NOT NULL,
+                sort_order BIGINT NOT NULL,
+                date_created BIGINT NOT NULL,
+                date_modified BIGINT NOT NULL
+            )",
             "CREATE TABLE IF NOT EXISTS bookmark_tags (
                 bookmark_id BIGINT NOT NULL,
                 tag_id BIGINT NOT NULL,

@@ -104,6 +104,11 @@ fn router(state: S) -> Router {
         )
         .route("/api/bookmarks/{id}/archive/", post(api::bookmark_archive))
         .route("/api/bookmarks/{id}/unarchive/", post(api::bookmark_unarchive))
+        .route("/api/bundles/", get(api::bundles_list).post(api::bundle_create))
+        .route(
+            "/api/bundles/{id}/",
+            get(api::bundle_get).put(api::bundle_put).patch(api::bundle_patch).delete(api::bundle_delete),
+        )
         .route("/api/tags/", get(api::tags_list).post(api::tags_create))
         .route("/api/tags/stats/", get(api::tags_stats))
         .route("/api/tags/merge/", post(api::tags_merge))

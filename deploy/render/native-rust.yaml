@@ -1,0 +1,22 @@
+# Render web service WITHOUT Docker: Render's native Rust runtime builds from source.
+# First build takes a few minutes (cargo release build); later builds are cached.
+# Use in the dashboard: New -> Blueprint -> "Blueprint file path": deploy/render/native-rust.yaml
+services:
+  - type: web
+    name: linkding-rs
+    runtime: rust
+    plan: starter
+    buildCommand: cargo build --release
+    startCommand: ./target/release/linkding-rs
+    healthCheckPath: /health
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: DATABASE_URL
+        value: sqlite:///data/db.sqlite3
+      - key: LD_SUPERUSER_NAME
+        value: admin
+      - key: LD_SUPERUSER_PASSWORD
+        sync: false
