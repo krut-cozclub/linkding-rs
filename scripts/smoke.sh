@@ -136,6 +136,16 @@ has "bundle bad enum" "$(curl -s -X PATCH "${A[@]}" "${J[@]}" -d '{"filter_share
 has "bundle renumbered" "$(curl -s "${A[@]}" $B/api/bundles/)" '"order":1'
 for i in $BID2 $BID3; do curl -s -o /dev/null -X DELETE "${A[@]}" $B/api/bundles/$i/; done
 
+echo "== tag cloud / profile / custom css / bundle order+preview"
+has "tag cloud lists tags of matching bookmarks" "$(curl -s "${A[@]}" --get --data-urlencode 'q=hacker' "$B/api/tags/cloud/")" '"news"'
+hasnt "tag cloud excludes other tags" "$(curl -s "${A[@]}" --get --data-urlencode 'q=hacker' "$B/api/tags/cloud/")" '"lang"'
+has "tag cloud invalid query -> empty" "$(curl -s "${A[@]}" --get --data-urlencode 'q=(hacker' "$B/api/tags/cloud/")" '[]'
+has "profile PATCH new settings" "$(curl -s -X PATCH "${A[@]}" "${J[@]}" -d '{"tag_grouping":"disabled","sticky_pagination":true,"custom_css":"body{outline:1px solid red}","items_per_page":15}' $B/api/user/profile/)" '"tag_grouping":"disabled"'
+has "profile persisted" "$(curl -s "${A[@]}" $B/api/user/profile/)" '"items_per_page":15'
+has "custom css served" "$(curl -s -b $JAR $B/custom_css)" 'outline:1px solid red'
+curl -s -o /dev/null -X PATCH "${A[@]}" "${J[@]}" -d '{"tag_grouping":"alphabetical","sticky_pagination":false,"custom_css":"","items_per_page":30}' $B/api/user/profile/
+PV=$(curl -s "${A[@]}" --get --data-urlencode 'pv=1' --data-urlencode 'pv_any=news lang' "$B/api/bookmarks/")
+has "bundle inline preview filter" "$PV" '"count":2,'
 echo "== shared / delete"
 has "shared requires sharing enabled" "$(curl -s $B/api/bookmarks/shared/)" '"count":0,'
 curl -s -b $JAR -X PATCH -H 'X-Requested-With: ld' "${J[@]}" -d '{"enable_sharing":true,"enable_public_sharing":true}' $B/api/user/profile/ >/dev/null

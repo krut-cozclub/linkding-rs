@@ -1,13 +1,13 @@
 # linkding-rs
 
 A tiny, very fast rewrite of [linkding](https://github.com/sissbruecker/linkding) in Rust.
-One static binary (~11 MB image), ~2 MB RAM idle, SQLite / PostgreSQL / MySQL, plain HTML + JS frontend.
+One static binary (~11 MB image), ~2 MB RAM idle, SQLite / PostgreSQL / MySQL, a dependency-free HTML + JS frontend that uses linkding's own stylesheets, so it looks and behaves like the original.
 
 **Compatible with:** the official linkding browser extensions (Chrome/Firefox), the bookmarklet, the linkding REST API
 (`/api/bookmarks/`, `/api/tags/`, `/api/user/profile/`, `check`, archive/unarchive, upsert-by-URL, token auth), and
 linkding's Netscape-HTML import/export (including `[linkding-notes]`, `TOREAD`, `PRIVATE` and the `linkding:bookmarks.archived` tag).
 
-**Features:** bookmarks with tags, notes, unread/shared flags, archive, bundles, bulk edit, details view, search syntax (`#tag`, `!unread`, `and/or/not`, parentheses), tag management, API tokens, import/export, dark mode.
+**Features:** bookmarks with tags, notes (Markdown), unread/shared flags, archive, bundles (with live preview and drag-to-reorder), bulk edit, details view, search with autocomplete and saved preferences (`#tag`, `!unread`, `and/or/not`, parentheses), tag management and merge, alphabetical tag cloud, API tokens, bookmarklet, import/export, light/dark/auto theme, custom CSS.
 
 **Not implemented (yet):** assets/snapshots (singlefile), favicon/preview image storage, feeds, OIDC / auth-proxy, auto-tagging rules, multi-user admin UI.
 
@@ -101,6 +101,10 @@ cargo test                       # unit tests (search grammar, import/export for
 cargo run                        # needs a C toolchain; or use Docker (see below)
 scripts/smoke.sh http://localhost:9090 admin change-me   # end-to-end API test, works on every database
 ```
+
+## Credits
+
+The look and feel (stylesheets, icons, markup structure) come from [linkding](https://github.com/sissbruecker/linkding) by Sascha Ißbrücker, MIT licensed — see `THIRD_PARTY_LICENSE_linkding.txt`.
 
 ## Why it is fast
 

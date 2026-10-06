@@ -1,29 +1,48 @@
-<!doctype html>
-<html lang="en">
+<!DOCTYPE html>
+<html lang="en" data-v="{{v}}">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>linkding</title>
-<link rel="icon" href="/static/favicon.svg?v={{v}}" type="image/svg+xml">
-<link rel="stylesheet" href="/static/style.css?v={{v}}">
-<link rel="preload" href="/static/app.js?v={{v}}" as="script">
+  <meta charset="UTF-8">
+  <link rel="icon" href="/static/favicon.ico?v={{v}}" sizes="48x48">
+  <link rel="icon" href="/static/favicon.svg?v={{v}}" sizes="any" type="image/svg+xml">
+  <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png?v={{v}}">
+  <link rel="mask-icon" href="/static/safari-pinned-tab.svg?v={{v}}" color="#5856e0">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, minimal-ui">
+  <meta name="description" content="Self-hosted bookmark service">
+  <meta name="robots" content="noindex">
+  <title>Linkding</title>
+  <script>
+    // Apply the saved theme before first paint to avoid a flash
+    (function () {
+      var t = ''; try { t = localStorage.getItem('ld.theme') || ''; } catch (e) {}
+      window.__theme = t;
+    })();
+  </script>
+  <link id="css-dark" href="/static/theme-dark.css?v={{v}}" rel="stylesheet" media="(prefers-color-scheme: dark)">
+  <link id="css-light" href="/static/theme-light.css?v={{v}}" rel="stylesheet" media="(prefers-color-scheme: light)">
+  <script>
+    (function () {
+      var t = window.__theme, d = document.getElementById('css-dark'), l = document.getElementById('css-light');
+      if (t === 'light') { d.media = 'not all'; l.media = 'all'; }
+      else if (t === 'dark') { l.media = 'not all'; d.media = 'all'; }
+    })();
+  </script>
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#161822">
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#5856e0">
 </head>
 <body>
-<header id="top">
-  <a href="/bookmarks" data-nav class="brand"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg><span>linkding</span></a>
-  <nav>
-    <a href="/bookmarks" data-nav>Bookmarks</a>
-    <a href="/bookmarks/archived" data-nav>Archived</a>
-    <a href="/bookmarks/shared" data-nav>Shared</a>
-    <a href="/tags" data-nav>Tags</a>
-    <a href="/settings" data-nav>Settings</a>
-    <a href="/logout/">Logout</a>
-  </nav>
-  <form id="search" role="search"><input id="q" type="search" placeholder="Search…  #tag  !unread" autocomplete="off" spellcheck="false"></form>
-  <button id="add" class="btn primary" type="button">+ Add bookmark</button>
-</header>
-<main id="app" aria-live="polite"></main>
-<div id="toast" role="status"></div>
-<script src="/static/app.js?v={{v}}" defer></script>
+  <header class="container">
+    <div class="message-list" id="messages"></div>
+    <div class="d-flex justify-between">
+      <a href="/bookmarks" data-nav class="app-link d-flex align-center">
+        <img class="app-logo" src="/static/logo.png?v={{v}}" alt="Application logo">
+        <span class="app-name">LINKDING</span>
+      </a>
+      <nav id="nav"></nav>
+    </div>
+  </header>
+  <div class="content container" id="content"></div>
+  <div class="modals"></div>
+  <script src="/static/app.js?v={{v}}"></script>
 </body>
 </html>

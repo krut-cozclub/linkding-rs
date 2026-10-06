@@ -1,38 +1,72 @@
-<!doctype html>
-<html lang="en">
+<!DOCTYPE html>
+<html lang="en" data-v="{{v}}">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Login · linkding</title>
-<link rel="icon" href="/static/favicon.svg?v={{v}}" type="image/svg+xml">
-<link rel="stylesheet" href="/static/style.css?v={{v}}">
+  <meta charset="UTF-8">
+  <link rel="icon" href="/static/favicon.ico?v={{v}}" sizes="48x48">
+  <link rel="icon" href="/static/favicon.svg?v={{v}}" sizes="any" type="image/svg+xml">
+  <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png?v={{v}}">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, minimal-ui">
+  <meta name="robots" content="noindex">
+  <title>Login - Linkding</title>
+  <link id="css-dark" href="/static/theme-dark.css?v={{v}}" rel="stylesheet" media="(prefers-color-scheme: dark)">
+  <link id="css-light" href="/static/theme-light.css?v={{v}}" rel="stylesheet" media="(prefers-color-scheme: light)">
+  <script>
+    (function () {
+      var t = ''; try { t = localStorage.getItem('ld.theme') || ''; } catch (e) {}
+      var d = document.getElementById('css-dark'), l = document.getElementById('css-light');
+      if (t === 'light') { d.media = 'not all'; l.media = 'all'; }
+      else if (t === 'dark') { l.media = 'not all'; d.media = 'all'; }
+    })();
+  </script>
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#161822">
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#5856e0">
 </head>
-<body class="login">
-<form id="f" class="card login-card" autocomplete="on">
-  <h1><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg> linkding</h1>
-  <label>Username<input name="username" autocomplete="username" required autofocus></label>
-  <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
-  <p id="err" class="error" hidden></p>
-  <button class="btn primary" type="submit">Login</button>
-</form>
-<script>
-document.getElementById('f').addEventListener('submit', async e => {
-  e.preventDefault();
-  const f = e.target, err = document.getElementById('err');
-  err.hidden = true;
-  const r = await fetch('/login/', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json', 'X-Requested-With': 'ld'},
-    body: JSON.stringify({username: f.username.value, password: f.password.value})
-  });
-  if (r.ok) {
-    const next = new URLSearchParams(location.search).get('next') || '/bookmarks';
-    location.href = next.startsWith('/') && !next.startsWith('//') ? next : '/bookmarks';
-  } else {
-    err.textContent = 'Please enter a correct username and password.';
-    err.hidden = false;
-  }
-});
-</script>
+<body>
+  <header class="container">
+    <div class="d-flex justify-between">
+      <a href="/" class="app-link d-flex align-center">
+        <img class="app-logo" src="/static/logo.png?v={{v}}" alt="Application logo">
+        <span class="app-name">LINKDING</span>
+      </a>
+      <nav><a href="/login/" class="btn btn-link">Login</a></nav>
+    </div>
+  </header>
+  <div class="content container">
+    <main class="auth-page" aria-labelledby="main-heading">
+      <div class="section-header">
+        <h1 id="main-heading">Login</h1>
+      </div>
+      <form id="f" method="post" action="/login/">
+        <p class="form-input-hint is-error" id="err" hidden>Your username and password didn't match. Please try again.</p>
+        <div class="form-group">
+          <label for="id_username" class="form-label">Username</label>
+          <input type="text" name="username" class="form-input" id="id_username" autocomplete="username" autocapitalize="none" autofocus required>
+        </div>
+        <div class="form-group">
+          <label for="id_password" class="form-label">Password</label>
+          <input type="password" name="password" class="form-input" id="id_password" autocomplete="current-password" required>
+        </div>
+        <input type="submit" value="Login" class="btn btn-primary width-100 mt-4">
+      </form>
+    </main>
+  </div>
+  <script>
+    document.getElementById('f').addEventListener('submit', async function (e) {
+      e.preventDefault();
+      var f = e.target, err = document.getElementById('err');
+      err.hidden = true;
+      var r = await fetch('/login/', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-Requested-With': 'ld'},
+        body: JSON.stringify({username: f.username.value, password: f.password.value})
+      });
+      if (r.ok) {
+        var next = new URLSearchParams(location.search).get('next') || '/bookmarks';
+        location.href = next.charAt(0) === '/' && next.charAt(1) !== '/' ? next : '/bookmarks';
+      } else {
+        err.hidden = false;
+      }
+    });
+  </script>
 </body>
 </html>

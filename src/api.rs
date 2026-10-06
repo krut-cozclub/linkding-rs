@@ -242,15 +242,14 @@ enum Mode {
     Shared,
 }
 
-async fn list_core(
+/// Builds the WHERE clause shared by the bookmark list and the tag cloud.
+/// `Ok(None)` means the search query is invalid, which yields no results.
+async fn build_filter(
     app: &S,
     owner: Option<i64>,
-    headers: &HeaderMap,
-    path: &str,
     q: &HashMap<String, String>,
     mode: Mode,
-) -> ApiResult<Response> {
-    let (limit, offset) = paging(q);
+) -> ApiResult<Option<(String, Vec<P>)>> {
     let mut where_sql = String::new();
     let mut params: Vec<P> = Vec::new();
 
@@ -276,6 +275,8 @@ async fn list_core(
         }
     }
 
+    // A bundle comes either from the database (?bundle=ID) or inline from the bundle form (?pv_*) for the live preview.
+    let mut spec: Option<[String; 6]> = None;
     if let (Some(bid), Some(owner)) = (q.get("bundle").and_then(|b| b.parse::<i64>().ok()), owner) {
         let row = app
             .db
@@ -286,43 +287,52 @@ async fn list_core(
             )
             .await?;
         if let Some(r) = row {
-            let words = |i: usize| -> Result<Vec<String>, sqlx::Error> {
-                Ok(r.try_get::<String, _>(i)?.split_whitespace().map(|t| t.to_lowercase()).collect())
-            };
-            let tag_in = |sql: &mut String, params: &mut Vec<P>, tags: &[String], sep: &str, negate: bool| {
-                if tags.is_empty() {
-                    return;
-                }
-                sql.push_str(" AND ");
-                if negate {
-                    sql.push_str("NOT ");
-                }
-                sql.push('(');
-                for (i, t) in tags.iter().enumerate() {
-                    if i > 0 {
-                        sql.push_str(sep);
-                    }
-                    sql.push_str(search::TAG_EXISTS);
-                    params.push(P::S(t.clone()));
-                }
-                sql.push(')');
-            };
-            let (any, all, excl) = (words(1)?, words(2)?, words(3)?);
-            tag_in(&mut where_sql, &mut params, &any, " OR ", false);
-            tag_in(&mut where_sql, &mut params, &all, " AND ", false);
-            tag_in(&mut where_sql, &mut params, &excl, " OR ", true);
-            for (i, col) in [(4, "b.unread"), (5, "b.shared")] {
-                match r.try_get::<String, _>(i)?.as_str() {
-                    "yes" => where_sql.push_str(&format!(" AND {col} = 1")),
-                    "no" => where_sql.push_str(&format!(" AND {col} = 0")),
-                    _ => {}
-                }
+            spec = Some([
+                r.try_get::<String, _>(0)?,
+                r.try_get::<String, _>(1)?,
+                r.try_get::<String, _>(2)?,
+                r.try_get::<String, _>(3)?,
+                r.try_get::<String, _>(4)?,
+                r.try_get::<String, _>(5)?,
+            ]);
+        }
+    } else if q.contains_key("pv") {
+        let g = |k: &str| q.get(k).cloned().unwrap_or_default();
+        spec = Some([g("pv_search"), g("pv_any"), g("pv_all"), g("pv_excl"), g("pv_unread"), g("pv_shared")]);
+    }
+    if let Some(spec) = spec {
+        let words = |s: &str| -> Vec<String> { s.split_whitespace().map(|t| t.to_lowercase()).collect() };
+        let tag_in = |sql: &mut String, params: &mut Vec<P>, tags: &[String], sep: &str, negate: bool| {
+            if tags.is_empty() {
+                return;
             }
-            let bsearch: String = r.try_get(0)?;
-            if let Ok(Some(node)) = search::parse(&bsearch) {
-                where_sql.push_str(" AND ");
-                search::to_sql(&node, false, &mut where_sql, &mut params);
+            sql.push_str(" AND ");
+            if negate {
+                sql.push_str("NOT ");
             }
+            sql.push('(');
+            for (i, t) in tags.iter().enumerate() {
+                if i > 0 {
+                    sql.push_str(sep);
+                }
+                sql.push_str(search::TAG_EXISTS);
+                params.push(P::S(t.clone()));
+            }
+            sql.push(')');
+        };
+        tag_in(&mut where_sql, &mut params, &words(&spec[1]), " OR ", false);
+        tag_in(&mut where_sql, &mut params, &words(&spec[2]), " AND ", false);
+        tag_in(&mut where_sql, &mut params, &words(&spec[3]), " OR ", true);
+        for (i, col) in [(4, "b.unread"), (5, "b.shared")] {
+            match spec[i].as_str() {
+                "yes" => where_sql.push_str(&format!(" AND {col} = 1")),
+                "no" => where_sql.push_str(&format!(" AND {col} = 0")),
+                _ => {}
+            }
+        }
+        if let Ok(Some(node)) = search::parse(&spec[0]) {
+            where_sql.push_str(" AND ");
+            search::to_sql(&node, false, &mut where_sql, &mut params);
         }
     }
 
@@ -330,7 +340,7 @@ async fn list_core(
     if !query.trim().is_empty() {
         match search::parse(query) {
             Err(()) => {
-                return Ok(page::<BmOut>(headers, path, q, 0, limit, offset, vec![]));
+                return Ok(None);
             }
             Ok(None) => {}
             Ok(Some(node)) => {
@@ -359,6 +369,21 @@ async fn list_core(
             params.push(d.timestamp_micros().into());
         }
     }
+    Ok(Some((where_sql, params)))
+}
+
+async fn list_core(
+    app: &S,
+    owner: Option<i64>,
+    headers: &HeaderMap,
+    path: &str,
+    q: &HashMap<String, String>,
+    mode: Mode,
+) -> ApiResult<Response> {
+    let (limit, offset) = paging(q);
+    let Some((where_sql, params)) = build_filter(app, owner, q, mode).await? else {
+        return Ok(page::<BmOut>(headers, path, q, 0, limit, offset, vec![]));
+    };
     let order = match q.get("sort").map(|s| s.as_str()).unwrap_or("added_desc") {
         "added_asc" => "b.date_added ASC, b.id ASC",
         "modified_asc" => "b.date_modified ASC, b.id ASC",
@@ -907,23 +932,39 @@ pub async fn profile_get(State(app): State<S>, Auth(uid): Auth) -> ApiResult<Res
 pub async fn profile_patch(State(app): State<S>, Auth(uid): Auth, body: Bytes) -> ApiResult<Response> {
     let m = parse_body(&body)?;
     let mut current = profile_json(&app, uid).await?;
-    const ALLOWED: [&str; 9] = [
+    const ALLOWED: &[&str] = &[
         "theme",
         "bookmark_date_display",
+        "bookmark_description_display",
+        "bookmark_description_max_lines",
         "bookmark_link_target",
         "web_archive_integration",
         "tag_search",
+        "tag_grouping",
         "enable_favicons",
         "display_url",
         "permanent_notes",
+        "display_view_bookmark_action",
+        "display_edit_bookmark_action",
+        "display_archive_bookmark_action",
+        "display_remove_bookmark_action",
+        "sticky_pagination",
+        "collapse_side_panel",
+        "hide_bundles",
+        "default_mark_unread",
+        "default_mark_shared",
+        "custom_css",
         "search_preferences",
+        "items_per_page",
     ];
     let mut settings = default_settings();
-    for k in ALLOWED.iter().chain(["items_per_page"].iter()) {
+    for k in ALLOWED.iter() {
         if let Some(v) = m.get(*k) {
             current[*k] = v.clone();
         }
-        settings[*k] = current[*k].clone();
+        if !current[*k].is_null() {
+            settings[*k] = current[*k].clone();
+        }
     }
     let sharing = m.get("enable_sharing").and_then(|v| v.as_bool()).unwrap_or_else(|| current["enable_sharing"].as_bool().unwrap_or(false));
     let public = sharing && m.get("enable_public_sharing").and_then(|v| v.as_bool()).unwrap_or_else(|| current["enable_public_sharing"].as_bool().unwrap_or(false));
@@ -1074,6 +1115,16 @@ fn bundle_fields(m: &Map<String, Value>, create: bool) -> ApiResult<Map<String, 
             }
         }
     }
+    if let Some(v) = m.get("order") {
+        match v.as_i64() {
+            Some(n) if n >= 0 => {
+                out.insert("order".into(), json!(n));
+            }
+            _ => {
+                errs.insert("order".into(), json!(["A valid integer is required."]));
+            }
+        }
+    }
     for key in ["filter_unread", "filter_shared"] {
         match m.get(key).and_then(|v| v.as_str()) {
             None if !m.contains_key(key) => {}
@@ -1136,8 +1187,13 @@ async fn bundle_update(app: S, uid: i64, id: i64, body: Bytes, partial: bool) ->
     let mut sets = vec!["date_modified = ?".to_string()];
     let mut p: Vec<P> = vec![now_micros().into()];
     for (k, v) in &m {
-        sets.push(format!("{k} = ?"));
-        p.push(v.as_str().unwrap_or("").into());
+        if k == "order" {
+            sets.push("sort_order = ?".to_string());
+            p.push(v.as_i64().unwrap_or(0).into());
+        } else {
+            sets.push(format!("{k} = ?"));
+            p.push(v.as_str().unwrap_or("").into());
+        }
     }
     p.push(id.into());
     p.push(uid.into());
@@ -1174,4 +1230,44 @@ pub async fn bundle_delete(State(app): State<S>, Auth(uid): Auth, Path(id): Path
             .await?;
     }
     Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+// ------------------------------------------------------------ tag cloud / custom css
+
+/// Not part of linkding's API: names of the tags used by bookmarks that match the same
+/// filters as the list (mode = active | archived | shared), for the side panel tag cloud.
+pub async fn tag_cloud(State(app): State<S>, MaybeAuth(uid): MaybeAuth, Query(q): Q) -> ApiResult<Response> {
+    let mode = match q.get("mode").map(|s| s.as_str()) {
+        Some("archived") => Mode::Archived,
+        Some("shared") => Mode::Shared,
+        _ => Mode::Active,
+    };
+    let Some((where_sql, params)) = build_filter(&app, uid, &q, mode).await? else {
+        return Ok(json_response(StatusCode::OK, &Vec::<String>::new()));
+    };
+    let sql = format!(
+        "SELECT t.name FROM tags t WHERE t.id IN (SELECT bt.tag_id FROM bookmark_tags bt JOIN bookmarks b ON b.id = bt.bookmark_id WHERE {where_sql}) ORDER BY t.name_lower"
+    );
+    let rows = app.db.fetch_all(&app.db.pool, &sql, &params).await?;
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::with_capacity(rows.len());
+    for r in rows {
+        let n: String = r.try_get(0)?;
+        if seen.insert(n.to_lowercase()) {
+            out.push(n);
+        }
+    }
+    Ok(json_response(StatusCode::OK, &out))
+}
+
+/// Serves the signed-in user's custom CSS (linkding's `/custom_css`).
+pub async fn custom_css(State(app): State<S>, MaybeAuth(uid): MaybeAuth) -> ApiResult<Response> {
+    let mut css = String::new();
+    if let Some(uid) = uid {
+        let p = profile_json(&app, uid).await?;
+        css = p["custom_css"].as_str().unwrap_or("").to_string();
+    }
+    let mut r = (StatusCode::OK, css).into_response();
+    r.headers_mut().insert(axum::http::header::CONTENT_TYPE, axum::http::HeaderValue::from_static("text/css; charset=utf-8"));
+    Ok(r)
 }
