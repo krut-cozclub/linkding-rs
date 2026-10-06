@@ -63,6 +63,7 @@ jobs:
           images: ghcr.io/${{ github.repository }}
           tags: |
             type=semver,pattern={{version}}
+            type=semver,pattern=v{{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest
           labels: |
@@ -90,6 +91,6 @@ jobs:
           body: |
             ## Docker
             ```
-            docker run -p 9090:9090 -v ld-data:/data -e LD_SUPERUSER_NAME=admin -e LD_SUPERUSER_PASSWORD=change-me ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+            docker run -p 9090:9090 -v ld-data:/data -e LD_SUPERUSER_NAME=admin -e LD_SUPERUSER_PASSWORD=change-me ghcr.io/${{ github.repository }}:latest
             ```
             Multi-arch (amd64 + arm64). Static binaries for Linux, macOS (Apple silicon) and Windows are attached below.
