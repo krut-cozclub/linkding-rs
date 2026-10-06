@@ -35,19 +35,44 @@ docker run -p 9090:9090 -v ld-data:/data \
 Open http://localhost:9090 → **Settings → Browser extension & API** to create an API token for the extension
 (Base URL = your server URL, no trailing slash needed).
 
-## Configuration (environment)
+## Configuration (environment variables)
+
+### Required
+
+| Variable | Example | Why |
+|---|---|---|
+| `LD_SUPERUSER_NAME` | `admin` | Username of the first account. It is created on startup if it doesn't exist. Without it there is no way to log in. |
+| `LD_SUPERUSER_PASSWORD` | `a-long-random-password` | Password for that account (only used when the account is created). |
+
+### Required only for Postgres / MySQL
+
+| Variable | Example | Why |
+|---|---|---|
+| `DATABASE_URL` | `postgres://user:pass@host:5432/db` or `mysql://user:pass@host:3306/db` | Selects the database by URL scheme. **Leave it unset to use SQLite**, but then mount a persistent volume at `/data`, otherwise bookmarks are lost on every redeploy. |
+
+On Railway use `${{Postgres.DATABASE_URL}}` (or the MySQL equivalent). On Render use the database's connection string (the blueprints wire this up for you).
+
+### Optional
 
 | Variable | Default | Notes |
 |---|---|---|
-| `DATABASE_URL` | `sqlite://data/db.sqlite3` | `sqlite://…`, `postgres://…` / `postgresql://…`, `mysql://…` |
-| `PORT` | `9090` | Railway / Render set this automatically |
-| `LD_SUPERUSER_NAME` / `LD_SUPERUSER_PASSWORD` | – | Created on first start if missing |
-| `LD_SERVER_HOST` | `::` | Falls back to `0.0.0.0` if IPv6 is unavailable |
-| `LD_DB_POOL` | `5` | Max DB connections |
-| `LD_DISABLE_URL_VALIDATION` | off | Accept any URL scheme |
-| `LD_ALLOWED_INTERNAL_HOSTS` | – | Hosts the metadata scraper may reach on private networks (`*` = all) |
-| `LD_SESSION_COOKIE_AGE` | `1209600` | Seconds |
-| `LD_CORS_ALLOWED_ORIGINS` | – | Comma separated |
+| `PORT` | `9090` | Railway and Render set this automatically; don't set it there. |
+| `LD_SERVER_HOST` | `::` | Bind address. Falls back to `0.0.0.0` if IPv6 is unavailable. |
+| `LD_DB_POOL` | `5` | Max database connections. |
+| `LD_DISABLE_URL_VALIDATION` | off | Set to `true` to accept any URL scheme (default allows http, https, ftp, ftps). |
+| `LD_ALLOWED_INTERNAL_HOSTS` | – | Hosts the metadata scraper may reach on private networks (`*` = all). Blocked by default (SSRF protection). |
+| `LD_SESSION_COOKIE_AGE` | `1209600` | Login session lifetime in seconds (14 days). |
+| `LD_CORS_ALLOWED_ORIGINS` | – | Comma-separated origins allowed to call `/api/` from a browser. |
+
+Minimal examples:
+
+```sh
+# SQLite (needs a volume at /data)
+LD_SUPERUSER_NAME=admin  LD_SUPERUSER_PASSWORD=change-me
+
+# Postgres
+LD_SUPERUSER_NAME=admin  LD_SUPERUSER_PASSWORD=change-me  DATABASE_URL=postgres://user:pass@host:5432/linkding
+```
 
 Metadata scraping is SSRF-protected: private, loopback and link-local addresses are blocked unless allow-listed.
 
